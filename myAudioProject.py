@@ -42,17 +42,17 @@ parser.add_argument(
     '-d', '--device', type=int_or_str,
     help='input device (numeric ID or substring)')
 parser.add_argument(
-    '-w', '--window', type=float, default=1000, metavar='DURATION',
+    '-w', '--window', type=float, default=2000, metavar='DURATION',
     help='visible time slot (default: %(default)s ms)')
 parser.add_argument(
-    '-i', '--interval', type=float, default=30,
+    '-i', '--interval', type=float, default=1,
     help='minimum time between plot updates (default: %(default)s ms)')
 parser.add_argument(
     '-b', '--blocksize', type=int, help='block size (in samples)')
 parser.add_argument(
     '-r', '--samplerate', type=float, help='sampling rate of audio device')
 parser.add_argument(
-    '-n', '--downsample', type=int, default=10, metavar='N',
+    '-n', '--downsample', type=int, default=1, metavar='N',
     help='display every Nth sample (default: %(default)s)')
 args = parser.parse_args(remaining)
 if any(c < 1 for c in args.channels):
@@ -123,7 +123,7 @@ try:
     ax2.set_xlabel('Frequency')
     ax2.set_ylabel('Magnitude (dB)')
     ax2.set_xlim(0, args.samplerate / 2)
-    ax2.set_ylim(-0.1, 10)  # Adjust the limits as necessary
+    ax2.set_ylim(-0.1, 20)  # Adjust the limits as necessary
     fig.tight_layout(pad=0)
 
     stream = sd.InputStream(
