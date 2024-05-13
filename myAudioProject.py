@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""Plot the live microphone signal(s) with matplotlib.
+
+Matplotlib, NumPy, and SciPy have to be installed.
+
+"""
 import argparse
 import queue
 import sys
@@ -6,6 +12,7 @@ from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 import numpy as np
 import sounddevice as sd
+from scipy.fft import fft
 
 
 def int_or_str(text):
@@ -35,7 +42,7 @@ parser.add_argument(
     '-d', '--device', type=int_or_str,
     help='input device (numeric ID or substring)')
 parser.add_argument(
-    '-w', '--window', type=float, default=200, metavar='DURATION',
+    '-w', '--window', type=float, default=1000, metavar='DURATION',
     help='visible time slot (default: %(default)s ms)')
 parser.add_argument(
     '-i', '--interval', type=float, default=30,
@@ -58,18 +65,12 @@ def audio_callback(indata, frames, time, status):
     """This is called (from a separate thread) for each audio block."""
     if status:
         print(status, file=sys.stderr)
-    # Fancy indexing with mapping creates a (necessary!) copy:
     q.put(indata[::args.downsample, mapping])
 
 
 def update_plot(frame):
-    """This is called by matplotlib for each plot update.
-
-    Typically, audio callbacks happen more frequently than plot updates,
-    therefore the queue tends to contain multiple blocks of audio data.
-
-    """
-    global plotdata
+    """This is called by matplotlib for each plot update."""
+    global plotdata, fftplotdata
     while True:
         try:
             data = q.get_nowait()
@@ -78,9 +79,24 @@ def update_plot(frame):
         shift = len(data)
         plotdata = np.roll(plotdata, -shift, axis=0)
         plotdata[-shift:, :] = data
+        freq_data = fft(data[:, 0])  # Take FFT of the first channel
+        fftplotdata = 20 * np.log10(np.abs(freq_data) + 1)
+
+    # Generate frequency axis values
+    freq_axis = np.fft.fftfreq(len(fftplotdata), d=1 / args.samplerate)
+
+    # Plot the FFT with correct frequencies on the x-axis
+    fft_line.set_ydata(fftplotdata)
+    fft_line.set_xdata(freq_axis)
+    fft_line.set_marker('o')
+    fft_line.set_linestyle("")
+    fft_line.set_color('blue')
+    fft_line.set_markersize(6)
+
     for column, line in enumerate(lines):
         line.set_ydata(plotdata[:, column])
-    return lines
+
+    return lines + [fft_line]
 
 
 try:
@@ -90,17 +106,24 @@ try:
 
     length = int(args.window * args.samplerate / (1000 * args.downsample))
     plotdata = np.zeros((length, len(args.channels)))
-
-    fig, ax = plt.subplots()
-    lines = ax.plot(plotdata)
+    fftplotdata = np.zeros((length,))
+    fig, (ax1, ax2) = plt.subplots(2, 1)
+    lines = ax1.plot(plotdata)
+    fft_line, = ax2.plot(fftplotdata)
     if len(args.channels) > 1:
-        ax.legend([f'channel {c}' for c in args.channels],
-                  loc='lower left', ncol=len(args.channels))
-    ax.axis((0, len(plotdata), -1, 1))
-    ax.set_yticks([0])
-    ax.yaxis.grid(True)
-    ax.tick_params(bottom=False, top=False, labelbottom=False,
-                   right=False, left=False, labelleft=False)
+        ax1.legend([f'channel {c}' for c in args.channels],
+                   loc='lower left', ncol=len(args.channels))
+    ax1.axis((0, len(plotdata), -1, 1))
+    ax1.set_yticks([0])
+    ax1.yaxis.grid(True)
+    ax1.tick_params(bottom=False, top=False, labelbottom=False,
+                    right=False, left=False, labelleft=False)
+    ax1.set_title('Microphone Signal')
+    ax2.set_title('FFT of Microphone Signal')
+    ax2.set_xlabel('Frequency')
+    ax2.set_ylabel('Magnitude (dB)')
+    ax2.set_xlim(0, args.samplerate / 2)
+    ax2.set_ylim(-0.1, 10)  # Adjust the limits as necessary
     fig.tight_layout(pad=0)
 
     stream = sd.InputStream(
