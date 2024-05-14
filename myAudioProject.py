@@ -42,7 +42,7 @@ parser.add_argument(
     '-d', '--device', type=int_or_str,
     help='input device (numeric ID or substring)')
 parser.add_argument(
-    '-w', '--window', type=float, default=2000, metavar='DURATION',
+    '-w', '--window', type=float, default=5000, metavar='DURATION',
     help='visible time slot (default: %(default)s ms)')
 parser.add_argument(
     '-i', '--interval', type=float, default=1,
@@ -63,8 +63,10 @@ q = queue.Queue()
 
 def audio_callback(indata, frames, time, status):
     """This is called (from a separate thread) for each audio block."""
+    chunk = np.zeros((length, len(args.channels)))
     if status:
         print(status, file=sys.stderr)
+
     q.put(indata[::args.downsample, mapping])
 
 
@@ -88,10 +90,10 @@ def update_plot(frame):
     # Plot the FFT with correct frequencies on the x-axis
     fft_line.set_ydata(fftplotdata)
     fft_line.set_xdata(freq_axis)
-    fft_line.set_marker('o')
-    fft_line.set_linestyle("")
+    fft_line.set_marker('.')
+    fft_line.set_linestyle("-")
     fft_line.set_color('blue')
-    fft_line.set_markersize(6)
+    fft_line.set_markersize(3)
 
     for column, line in enumerate(lines):
         line.set_ydata(plotdata[:, column])
@@ -127,9 +129,9 @@ try:
     fig.tight_layout(pad=0)
 
     stream = sd.InputStream(
-        device=args.device, channels=max(args.channels),
+        device=args.device, blocksize=2048, channels=max(args.channels),
         samplerate=args.samplerate, callback=audio_callback)
-    ani = FuncAnimation(fig, update_plot, interval=args.interval, blit=True)
+    ani = FuncAnimation(fig, update_plot, interval=args.interval, blit=True, cache_frame_data=False)
     with stream:
         plt.show()
 except Exception as e:
