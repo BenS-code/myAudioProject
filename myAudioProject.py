@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""Plot the live microphone signal(s) with matplotlib.
-
-Matplotlib, NumPy, and SciPy have to be installed.
-
-"""
 import argparse
 import queue
 import sys
@@ -13,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sounddevice as sd
 from scipy.fft import fft
+import scipy.signal as signal
 
 
 def int_or_str(text):
@@ -60,19 +55,16 @@ if any(c < 1 for c in args.channels):
 mapping = [c - 1 for c in args.channels]  # Channel numbers start with 1
 q = queue.Queue()
 
-
 def audio_callback(indata, frames, time, status):
     """This is called (from a separate thread) for each audio block."""
-    chunk = np.zeros((length, len(args.channels)))
     if status:
         print(status, file=sys.stderr)
-
     q.put(indata[::args.downsample, mapping])
 
 
 def update_plot(frame):
     """This is called by matplotlib for each plot update."""
-    global plotdata, fftplotdata
+    global plotdata, fftplotdata, filtered_plotdata, filtered_fftplotdata
     while True:
         try:
             data = q.get_nowait()
@@ -81,24 +73,36 @@ def update_plot(frame):
         shift = len(data)
         plotdata = np.roll(plotdata, -shift, axis=0)
         plotdata[-shift:, :] = data
-        freq_data = fft(data[:, 0])  # Take FFT of the first channel
+
+        # Apply Butterworth band-pass filter
+        filtered_data = signal.sosfilt(sos, data, axis=0)
+        filtered_plotdata = np.roll(filtered_plotdata, -shift, axis=0)
+        filtered_plotdata[-shift:, :] = filtered_data
+
+        # Compute FFT of the filtered signal
+        freq_data = fft(data[:, 0])  # FFT of the original signal
         fftplotdata = 20 * np.log10(np.abs(freq_data) + 1)
+
+        filtered_freq_data = fft(filtered_data[:, 0])  # FFT of the filtered signal
+        filtered_fftplotdata = 20 * np.log10(np.abs(filtered_freq_data) + 1)
 
     # Generate frequency axis values
     freq_axis = np.fft.fftfreq(len(fftplotdata), d=1 / args.samplerate)
 
-    # Plot the FFT with correct frequencies on the x-axis
+    # Update the plots
     fft_line.set_ydata(fftplotdata)
     fft_line.set_xdata(freq_axis)
-    fft_line.set_marker('.')
-    fft_line.set_linestyle("-")
-    fft_line.set_color('blue')
-    fft_line.set_markersize(3)
+
+    filtered_fft_line.set_ydata(filtered_fftplotdata)
+    filtered_fft_line.set_xdata(freq_axis)
 
     for column, line in enumerate(lines):
         line.set_ydata(plotdata[:, column])
 
-    return lines + [fft_line]
+    for column, line in enumerate(filtered_lines):
+        line.set_ydata(filtered_plotdata[:, column])
+
+    return lines + [fft_line] + filtered_lines + [filtered_fft_line]
 
 
 try:
@@ -108,25 +112,60 @@ try:
 
     length = int(args.window * args.samplerate / (1000 * args.downsample))
     plotdata = np.zeros((length, len(args.channels)))
+    filtered_plotdata = np.zeros((length, len(args.channels)))
     fftplotdata = np.zeros((length,))
-    fig, (ax1, ax2) = plt.subplots(2, 1)
+    filtered_fftplotdata = np.zeros((length,))
+
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
     lines = ax1.plot(plotdata)
     fft_line, = ax2.plot(fftplotdata)
+    filtered_lines = ax3.plot(filtered_plotdata)
+    filtered_fft_line, = ax4.plot(filtered_fftplotdata)
+
     if len(args.channels) > 1:
         ax1.legend([f'channel {c}' for c in args.channels],
                    loc='lower left', ncol=len(args.channels))
+        ax3.legend([f'filtered channel {c}' for c in args.channels],
+                   loc='lower left', ncol=len(args.channels))
+
     ax1.axis((0, len(plotdata), -1, 1))
     ax1.set_yticks([0])
     ax1.yaxis.grid(True)
     ax1.tick_params(bottom=False, top=False, labelbottom=False,
                     right=False, left=False, labelleft=False)
     ax1.set_title('Microphone Signal')
+
     ax2.set_title('FFT of Microphone Signal')
     ax2.set_xlabel('Frequency')
     ax2.set_ylabel('Magnitude (dB)')
     ax2.set_xlim(0, args.samplerate / 2)
-    ax2.set_ylim(-0.1, 20)  # Adjust the limits as necessary
-    fig.tight_layout(pad=0)
+    ax2.set_ylim(-0.1, 50)  # Adjust the limits as necessary
+
+    ax3.axis((0, len(filtered_plotdata), -1, 1))
+    ax3.set_yticks([0])
+    ax3.yaxis.grid(True)
+    ax3.tick_params(bottom=False, top=False, labelbottom=False,
+                    right=False, left=False, labelleft=False)
+    ax3.set_title('Filtered Signal')
+
+    ax4.set_title('FFT of Filtered Signal')
+    ax4.set_xlabel('Frequency')
+    ax4.set_ylabel('Magnitude (dB)')
+    ax4.set_xlim(0, args.samplerate / 2)
+    ax4.set_ylim(-0.1, 50)  # Adjust the limits as necessary
+
+    fig.tight_layout(pad=0.5)
+
+    # Butterworth band-pass filter design parameters
+    lowcut = 7500.0
+    highcut = 8500.0
+    order = 4
+
+    # Design Butterworth band-pass filter
+    nyquist = 0.5 * args.samplerate
+    low = lowcut / nyquist
+    high = highcut / nyquist
+    sos = signal.butter(order, [low, high], analog=False, btype='band', output='sos')
 
     stream = sd.InputStream(
         device=args.device, blocksize=2048, channels=max(args.channels),
