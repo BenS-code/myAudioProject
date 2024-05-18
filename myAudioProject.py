@@ -362,8 +362,8 @@ try:
     fig.tight_layout(pad=0.5)
 
     # Butterworth band-pass filter design parameters
-    lowcut = 7500.0
-    highcut = 8500.0
+    lowcut = 7700.0
+    highcut = 8300.0
     order = 4
 
     # Design Butterworth band-pass filter
